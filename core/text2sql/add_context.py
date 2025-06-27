@@ -11,22 +11,20 @@ load_dotenv()
 
 class AddTableContext:
 
-    def __init__(self,model_name,api_key=None,max_tokens=4000,temperature=0.5,attempts=5):
-
+    def __init__(self, model_name, api_key=None, max_tokens=4000, temperature=0.5, attempts=5):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
 
         if not self.api_key:
-
             raise ValueError("Please set your OPENAI_API_KEY.")
 
-        self.model_name =model_name
-        self.max_tokens =max_tokens
-        self.temperature=temperature
-        self.attempts =attempts
-        
-        self.openai_client = AsyncOpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),  # This is the default and can be omitted
-        )
+        self.model_name = model_name
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.attempts = attempts
+
+        # Correct usage
+        self.openai_client = AsyncOpenAI(api_key=self.api_key)
+
     async def get_output(self,messages,response_format={"type": "json_object"}) -> None:
 
         if isinstance(response_format,dict):
