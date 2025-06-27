@@ -456,8 +456,35 @@ from core.models import OpenaiChatModel,OpenAIVissionModel,AnthropicModel
 from core.text2sql.query_generator_2 import Text2SQL
 from core.tools.JupyterTool import NotebookManager
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+load_dotenv()
 
-SQl_Engine = Text2SQL("gpt-4o-mini","",db_type='mysql',host='host',port=3306,username='name',password='password',database='db_name',add_additional_context=True,max_attempts=10)
+POSTGRES_URI =  os.getenv("POSTGRES_URI")
+
+# Extract individual parts from the URI if needed
+from urllib.parse import urlparse
+
+parsed_uri = urlparse(POSTGRES_URI)
+username = parsed_uri.username
+password = parsed_uri.password
+host = parsed_uri.hostname
+port = parsed_uri.port or 5432  # Default PostgreSQL port
+database = parsed_uri.path.lstrip("/")
+
+# Initialize Text2SQL with PostgreSQL settings
+SQL_Engine = Text2SQL(
+    model_name="gpt-4o-mini",
+    api_key="",  # ✅ Added this line
+    db_type='postgresql',
+    host=host,
+    port=port,
+    username=username,
+    password=password,
+    database=database,
+    add_additional_context=True,
+    max_attempts=10
+)
+
 
 class GetRelavantTables(BaseModel):
     """

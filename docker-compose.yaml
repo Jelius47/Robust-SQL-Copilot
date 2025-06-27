@@ -41,7 +41,7 @@
 # volumes:
 #   work_dir:  # Declare the shared volume
 
-version: '3.8'
+# version: '3.8'
 
 services:
 
