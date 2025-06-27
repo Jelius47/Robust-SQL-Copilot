@@ -474,7 +474,7 @@ database = parsed_uri.path.lstrip("/")
 # Initialize Text2SQL with PostgreSQL settings
 SQL_Engine = Text2SQL(
     model_name="gpt-4o-mini",
-    api_key="",  # ✅ Added this line
+    api_key="",  # Added this line
     db_type='postgresql',
     host=host,
     port=port,
