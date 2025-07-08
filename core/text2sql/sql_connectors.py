@@ -1,6 +1,11 @@
 import sys
 sys.dont_write_bytecode =True
 
+from io import BytesIO
+from datetime import datetime ,timezone
+import logging
+from psycopg2.extras import execute_values
+
 import pyodbc
 import uuid
 import pymysql
@@ -117,7 +122,7 @@ class SQLConnector:
                 logger.info("Schema details fetched successfully.")
         except Exception as e:
             logger.error(f"Error fetching schema details: {e}")
-            return None
+            self.schema_description = None
 
     def connect_to_postgresql(self, host, port, username, password, database):
         # password = quote_plus(password)
@@ -211,7 +216,7 @@ class SQLConnector:
                 logger.info("Schema details fetched successfully.")
         except Exception as e:
             logger.error(f"Error fetching schema details: {e}")
-            return None
+            self.schema_description = None
 
     def connect_to_sql_server(self, host, port, username, password, database):
         # password = quote_plus(password)
@@ -339,7 +344,7 @@ class SQLConnector:
                 logger.info("Schema details fetched successfully.")
         except Exception as e:
             logger.error(f"Error fetching schema details: {e}")
-            return None
+            self.schema_description = None
 
     def connect_to_snowflake(self, account, user, password, warehouse, database, schema):
         # password = quote_plus(password)
@@ -384,11 +389,10 @@ class SQLConnector:
                 logger.info("Schema details fetched successfully.")
         except Exception as e:
             logger.error(f"Error fetching schema details: {e}")
-            return None
+            self.schema_description = None
 
     def _prepare_schema_description(self,data):
         try:
-
             data.columns = [i.lower() for i in data.columns]
             database_column = data.columns[data.columns.str.lower().str.contains("database")|data.columns.str.lower().str.contains("table_catalog")].to_list()[0]
             schema_column = data.columns[data.columns.str.lower().str.contains("table_schema")].to_list()[0]
@@ -406,9 +410,13 @@ class SQLConnector:
             self.df = filtred_data
             # filtred_data.to_csv("a.csv",index=False)
             logging.info(f"Available Features: {len(filtred_data)}")
+            
+            # Fix the undefined variable issue
+            filtred_data_filtred = pd.DataFrame()  # Initialize as empty DataFrame
             if self.database_name:
                 filtred_data_filtred = filtred_data[(filtred_data[schema_column]==self.database_name)|(filtred_data[database_column]==self.database_name)]
                 logging.info(f"Features from the particular database: {len(filtred_data_filtred)}")
+            
             if filtred_data_filtred.shape[0]>1:
                 filtred_data = filtred_data_filtred.copy()
 
@@ -438,26 +446,13 @@ class SQLConnector:
             self.schema_data_to_train = pd.DataFrame(schema_dict)
             return filtred_data
         except Exception as e:
-            logger.error(f"Error fetching schema details: {e}")
+            logger.error(f"Error preparing schema description: {e}")
             return None
 
     def disconnect(self):
         if self.connection:
             self.connection.close()
             logger.info("Database connection closed.")
-
-    # def run_sql_query(self, query):
-    #     if not self.connection:
-    #         logger.warning("Database connection is not established.")
-    #         return None
-
-    #     with self.connection.cursor() as cursor:
-    #         cursor.execute(query)
-    #         data = cursor.fetchall()
-    #         column = [i[0] for i in cursor.description]
-    #         df = pd.DataFrame(data, columns=column)
-    #         logger.info("SQL query executed successfully.")
-    #         return df
 
     def run_sql_query(self, query):
         
@@ -517,7 +512,7 @@ class SQLConnector:
         content_uuid = str(uuid.uuid5(namespace, hash_hex))
         return content_uuid
     
-    def extract_table_relationships(self,df):
+    def extract_table_relationships(self, df):
         """
         Extract table relationships from a DataFrame containing database schema information.
         Identifies relationships through both:
@@ -528,8 +523,18 @@ class SQLConnector:
             df (pandas.DataFrame): DataFrame containing database schema information
         
         Returns:
-            list: List of dictionaries containing table relationships
+            list: List of dictionaries containing table relationships, or empty list if df is None
         """
+        # Check if df is None and handle gracefully
+        if df is None:
+            logger.warning("DataFrame is None, cannot extract table relationships")
+            return []
+        
+        # Check if df is empty
+        if df.empty:
+            logger.warning("DataFrame is empty, no table relationships to extract")
+            return []
+        
         # Initialize results dictionary
         relationships = defaultdict(lambda: {
             'database': '',
@@ -549,18 +554,18 @@ class SQLConnector:
             table_columns[table_name].append({
                 'column_name': column_name,
                 'data_type': row['data_type'],
-                'is_primary_key': row['is_primary_key']
+                'is_primary_key': row.get('is_primary_key', 'NO')  # Default to 'NO' if column doesn't exist
             })
             
             # Set database and table name
-            relationships[table_name]['database'] = row['table_catalog']
-            relationships[table_name]['table_schema'] = row['table_schema']
+            relationships[table_name]['database'] = row.get('table_catalog', '')
+            relationships[table_name]['table_schema'] = row.get('table_schema', '')
             relationships[table_name]['table_name'] = table_name
         
         # Process explicit foreign key relationships
         for _, row in df.iterrows():
             table_name = row['table_name']
-            if pd.notna(row['referenced_table']) and pd.notna(row['referenced_column']):
+            if pd.notna(row.get('referenced_table')) and pd.notna(row.get('referenced_column')):
                 referenced_table = row['referenced_table']
                 shared_column = [row['column_name'], row['referenced_column']]
                 
@@ -655,3 +660,76 @@ Related Tables:\n"""
             relationship_docs.append({"database": relation['database'],"table_schema":relation['table_schema'],"table_name": relation['table_name'],'relation':doc_str.strip()})
 
         return relationship_docs
+
+ 
+    def process_uploaded_file(self, filename: str, content: bytes, chunk_size: int = 500) -> str:
+        try:
+            logging.info(f" Processing uploaded file: {filename}")
+
+            # 1. Parse file type
+            file_ext = filename.lower().split(".")[-1]
+            if file_ext == "csv":
+                df = pd.read_csv(BytesIO(content))
+            elif file_ext in ["xls", "xlsx"]:
+                df = pd.read_excel(BytesIO(content))
+            else:
+                return " Unsupported file format. Please upload CSV or Excel."
+
+            if df.empty:
+                return " File is empty."
+
+            # 2. Prepare table name
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            safe_name = filename.lower().replace(" ", "_").split(".")[0]
+            table_name = f"{safe_name}_{timestamp}"
+
+            # 3. Build CREATE TABLE statement
+            column_defs = []
+            safe_columns = []
+
+            for col in df.columns:
+                col_clean = col.strip().replace(" ", "_").lower()
+                safe_columns.append(col_clean)
+                column_defs.append(f'"{col_clean}" TEXT')  # default to TEXT for simplicity
+
+            create_sql = f'CREATE TABLE "{table_name}" ({", ".join(column_defs)});'
+
+            # 4. Ensure DB connection
+            if not self.connection:
+                connect_func = getattr(self, f"connect_to_{self.db_type.lower()}")
+                self.connection = connect_func(self.host, self.port, self.username, self.password, self.database)
+
+            with self.connection.cursor() as cursor:
+                cursor.execute(create_sql)
+
+                # 5. Insert in chunks
+                total_rows = len(df)
+                for start in range(0, total_rows, chunk_size):
+                    chunk = df.iloc[start:start+chunk_size]
+                    values = [tuple(map(str, row)) for row in chunk.values]
+
+                    placeholders = ', '.join([f'"{col}"' for col in safe_columns])
+                    insert_sql = f'INSERT INTO "{table_name}" ({placeholders}) VALUES %s'
+
+                    if self.db_type.lower() == "postgresql":
+                        execute_values(cursor, insert_sql, values)
+                    else:
+                        # fallback: build multi-row insert for MySQL/SQL Server (less efficient)
+                        placeholders = "(" + ", ".join(["%s"] * len(safe_columns)) + ")"
+                        full_sql = f'INSERT INTO "{table_name}" ({", ".join(safe_columns)}) VALUES ' + \
+                                ", ".join([placeholders] * len(values))
+                        flat_values = [val for row in values for val in row]
+                        cursor.execute(full_sql, flat_values)
+
+                    logging.info(f"Successfully: Inserted rows {start + 1}–{min(start + chunk_size, total_rows)}")
+
+                self.connection.commit()
+
+            # 6. Refresh schema for downstream use
+            self.__connect_to_db()
+
+            return f"Success: Uploaded file `{filename}` saved to table `{table_name}` ({total_rows} rows)."
+
+        except Exception as e:
+            logging.error(f" Failed to process file: {e}")
+            return f"Error processing `{filename}`: {e}"

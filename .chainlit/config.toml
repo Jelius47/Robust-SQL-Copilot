@@ -1,4 +1,7 @@
 [project]
+name = "DataPro"
+description = "Your smart assistant for data analysis"
+
 # Whether to enable telemetry (default: true). No personal data is collected.
 enable_telemetry = true
 
@@ -53,10 +56,10 @@ edit_message = true
 
 [UI]
 # Name of the assistant.
-name = "Assistant"
+name = "DataPro"
 
 # Description of the assistant. This is used for HTML tags.
-# description = ""
+# description = "Your smart assistant for data analysis"
 
 # Large size content are by default collapsed for a cleaner ui
 default_collapse_content = true

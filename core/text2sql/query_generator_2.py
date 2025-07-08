@@ -1,6 +1,7 @@
 import sys
 sys.dont_write_bytecode =True
-
+from io import BytesIO
+from datetime import datetime
 import os
 import logging
 import asyncio
@@ -98,52 +99,158 @@ class Text2SQL(QdrantVectorStore, SQLConnector,AddTableContext,Schema2Chunks):
         self.__connect_to_db()
 
     def __connect_to_db(self):
-        # Use getattr to dynamically call the correct method
+        try:
+           # Use getattr to dynamically call the correct method
+            logging.info(f"Connecting to The Database.....!")
 
-        logging.info(f"Connecting to The Database.....!")
-
-        func_name = f"connect_to_{self.db_type}"
-
-        func = getattr(self, func_name)
-
-        func(self.host, self.port, self.username, self.password, self.database)
-
-        if not self.client_qdrant.collection_exists(self.collection_name) or self.client_qdrant.count(self.collection_name).count==0 or self.override_existing_index:
-
-            filtred_data = self.schema_description
-
-            common_cols = self.extract_table_relationships(filtred_data)
-
-            if self.add_additional_context:
-
-                documents = []
-
-                ids = []
-
-                metadata = []
-
-                data_points = asyncio.run(self.process_all_schema(filtred_data,common_cols))
-
-                for key in data_points.keys():
-
-                    documents.extend(data_points[key]['chunks'])
-                    
-                    metadata.extend([{"table_id":data_points[key]['ids'][0],"text_data":data_points[key]['text_data'],"relationships":data_points[key]['relationships'],"common_columns":data_points[key]['common_columns']}]*len(data_points[key]['chunks']))
-
-                logging.info(f"Adding Schema details to VectorDB.....!")
-
+            if self.db_type == "PostgreSQL":
+                func = SQLConnector.connect_to_postgresql
+            elif self.db_type == "Snowflake":
+                func = SQLConnector.connect_to_snowflake
+            elif self.db_type == "SQL Server":
+                func = SQLConnector.connect_to_sql_server
+            elif self.db_type == "MySQL":
+                func = SQLConnector.connect_to_mysql
             else:
+                raise ValueError(f"Unsupported database type: {self.db_type}")
 
-                ids = []
+            # Call the connection function
+            try:
+                func(self, self.host, self.port, self.username, self.password, self.database)
+            except Exception as conn_error:
+                logging.error(f"Database connection failed: {str(conn_error)}")
+                return None
 
-                schemas =self.schema_data_to_train.to_dict(orient="records")
-
-                documents,metadata =self.split_text(schemas,common_cols)
-
-                logging.info(f"Adding Schema details to VectorDB.....!")
-
-            return self.add_documents_to_schema_details(documents,ids,metadata)
-
+        # Check if connection was successful        
+            # Critical check: Verify schema_description was populated
+            if self.schema_description is None:
+                logging.error("CRITICAL: schema_description is None after database connection!")
+                logging.error("Your connection method is not setting self.schema_description properly")
+                logging.error("Check your connection method implementation")
+                return None
+            
+            if hasattr(self.schema_description, 'empty') and self.schema_description.empty:
+                logging.error("CRITICAL: schema_description DataFrame is empty!")
+                logging.error("No tables found in the database or insufficient permissions")
+                return None
+            
+            logging.info(f"Schema description loaded successfully: {self.schema_description.shape}")
+            logging.info(f"Tables found: {self.schema_description['table_name'].nunique() if 'table_name' in self.schema_description.columns else 'unknown'}")
+            
+            # Check vector database conditions
+            try:
+                collection_exists = self.client_qdrant.collection_exists(self.collection_name)
+                collection_count = self.client_qdrant.count(self.collection_name).count if collection_exists else 0
+            except Exception as qdrant_error:
+                logging.error(f"Error checking Qdrant collection: {str(qdrant_error)}")
+                return None
+            
+            if not collection_exists or collection_count == 0 or self.override_existing_index:
+                filtred_data = self.schema_description
+                
+                # Extract table relationships with error handling
+                try:
+                    common_cols = self.extract_table_relationships(filtred_data)
+                    logging.info(f"Common columns extracted: {len(common_cols) if common_cols else 0}")
+                except Exception as rel_error:
+                    logging.error(f"Error extracting table relationships: {str(rel_error)}")
+                    common_cols = []
+                
+                if self.add_additional_context:
+                    documents = []
+                    ids = []
+                    metadata = []
+                    
+                    try:
+                        data_points = asyncio.run(self.process_all_schema(filtred_data, common_cols))
+                        
+                        # Handle the case where process_all_schema returns a list instead of dict
+                        if isinstance(data_points, list):
+                            if not data_points:
+                                logging.warning("process_all_schema returned empty list")
+                                return None
+                            else:
+                                logging.error("process_all_schema returned list instead of dict")
+                                return None
+                        
+                        if not isinstance(data_points, dict):
+                            logging.error(f"process_all_schema returned {type(data_points)}, expected dict")
+                            return None
+                        
+                        if not data_points:
+                            logging.warning("process_all_schema returned empty dict")
+                            return None
+                        
+                        # Process data points
+                        for key in data_points.keys():
+                            try:
+                                if 'chunks' not in data_points[key]:
+                                    logging.warning(f"No 'chunks' found in data_points[{key}]")
+                                    continue
+                                
+                                if 'ids' not in data_points[key]:
+                                    logging.warning(f"No 'ids' found in data_points[{key}]")
+                                    continue
+                                
+                                documents.extend(data_points[key]['chunks'])
+                                metadata.extend([{
+                                    "table_id": data_points[key]['ids'][0] if data_points[key]['ids'] else f"table_{key}",
+                                    "text_data": data_points[key].get('text_data', ''),
+                                    "relationships": data_points[key].get('relationships', []),
+                                    "common_columns": data_points[key].get('common_columns', [])
+                                }] * len(data_points[key]['chunks']))
+                                
+                            except Exception as process_error:
+                                logging.error(f"Error processing data_points[{key}]: {str(process_error)}")
+                                continue
+                        
+                        if not documents:
+                            logging.warning("No documents generated from schema processing")
+                            return None
+                        
+                        logging.info(f"Prepared {len(documents)} documents for VectorDB")
+                        
+                    except Exception as schema_error:
+                        logging.error(f"Error in schema processing: {str(schema_error)}")
+                        import traceback
+                        traceback.print_exc()
+                        return None
+                    
+                    logging.info(f"Adding Schema details to VectorDB.....!")
+                    
+                else:
+                    # Alternative path
+                    try:
+                        ids = []
+                        if not hasattr(self, 'schema_data_to_train') or self.schema_data_to_train is None:
+                            logging.error("schema_data_to_train is not set")
+                            return None
+                        
+                        schemas = self.schema_data_to_train.to_dict(orient="records")
+                        documents, metadata = self.split_text(schemas, common_cols)
+                        logging.info(f"Adding Schema details to VectorDB.....!")
+                        
+                    except Exception as split_error:
+                        logging.error(f"Error in split_text processing: {str(split_error)}")
+                        return None
+                
+                # Add documents to vector database
+                try:
+                    return self.add_documents_to_schema_details(documents, ids, metadata)
+                except Exception as add_error:
+                    logging.error(f"Error adding documents to VectorDB: {str(add_error)}")
+                    return None
+            
+            else:
+                logging.info("Using existing vector database collection")
+                return True
+                
+        except Exception as e:
+            logging.error(f"Unexpected error in __connect_to_db: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def TextAgent(self,messages,format):
         format = self.instructor_client.chat.completions.create(
             model=self.model_name,

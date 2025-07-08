@@ -43,8 +43,8 @@
 
 # version: '3.8'
 
+version: "3.8"
 services:
-
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qdrant-container
@@ -55,7 +55,7 @@ services:
       - "6334:6334"
     networks:
       - app_network
-      
+
   jupyter_service_sql:
     build: services/
     image: jupyter_service_sql:latest
@@ -80,22 +80,20 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - JUPYTER_URL=jupyter_service_sql:8888
-    tty: true 
+      - POSTGRES_URI=${POSTGRES_URI}  # Use env variable
+    extra_hosts: 
+      host.docker.internal: 172.17.0.1   #added this as part of debug of connecting my postgres db
+    env_file:
+      - .env  # Load from environment file
+    tty: true
     stdin_open: true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
     networks:
       - app_network
-
-
 
 networks:
   app_network:
     driver: bridge
 
 volumes:
-  work_dir:  # Shared volume for services
-  qdrant_storage:  # Persistent storage for Qdrant
+  work_dir:
+  qdrant_storage:

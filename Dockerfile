@@ -24,9 +24,14 @@ FROM python:3.12-slim
 # Set the working directory
 WORKDIR /app
 
-# Install system dependencies early
+# Install system dependencies including build tools for chroma-hnswlib
 RUN apt-get update && apt-get install -y --no-install-recommends \
     unixodbc-dev \
+    build-essential \
+    gcc \
+    g++ \
+    cmake \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Only copy requirements.txt to allow caching of pip install
@@ -43,4 +48,4 @@ COPY . .
 EXPOSE 8080
 
 # Default command
-CMD ["chainlit", "run", "assistant.py", "--port", "8080"]
+CMD ["chainlit", "run", "assistant.py", "--port", "8080" ,"--watch"]

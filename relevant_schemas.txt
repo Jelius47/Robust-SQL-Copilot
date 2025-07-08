@@ -1,0 +1,108 @@
+User Question : What is in my db?
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : What tables do I have?
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : list any statistics from any table of your choice
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : list all tables in my db
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : Access my table called upload and give five top entries
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : What tables are available in the database?
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : List all tables
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : Give me analysis on the table uploaded_data_595d9f91
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : Can you give me insights on all tables starting with user
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : give me insights on this table uploaded_data_595d9f91
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : draw charts on this table in my db uploaded_data_cd121cbd
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+
+User Question : I need insights from the uploaded table taking at least 10 entities.
+
+Sub Queries
+: 
+
+
+
+***************************************************************
+

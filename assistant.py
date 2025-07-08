@@ -13,7 +13,7 @@ from core.helper import print_colored
 import asyncio
 import base64
 import plotly.graph_objects as go
-
+from core.text2sql.sql_connectors import SQLConnector
 # -------------------------------- Structured Agent -------------------------------------
 
 import json
@@ -458,25 +458,38 @@ from core.tools.JupyterTool import NotebookManager
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 load_dotenv()
-
-POSTGRES_URI =  os.getenv("POSTGRES_URI")
-
-# Extract individual parts from the URI if needed
+import os
 from urllib.parse import urlparse
 
+POSTGRES_URI = os.getenv("POSTGRES_URI")
+# Extract individual parts from the URI
 parsed_uri = urlparse(POSTGRES_URI)
 username = parsed_uri.username
 password = parsed_uri.password
-host = parsed_uri.hostname
-port = parsed_uri.port or 5432  # Default PostgreSQL port
+original_host = parsed_uri.hostname
+port = parsed_uri.port or 5432
 database = parsed_uri.path.lstrip("/")
+
+# Fix the host for Docker environment
+if original_host == "172.18.0.3":
+    host = "172.18.0.3"  # Convert localhost to Docker host
+else:
+    host = original_host  # Use the original host for remote databases
+
+print(f"Original URI: {POSTGRES_URI}")
+print(f"Original Host: {original_host}")
+print(f"Docker Host: {host}")
+print(f"Username: {username}")
+print(f"Password: {'*' * len(password) if password else None}")
+print(f"Port: {port}")
+print(f"Database: {database}")
 
 # Initialize Text2SQL with PostgreSQL settings
 SQL_Engine = Text2SQL(
-    model_name="gpt-4o-mini",
-    api_key="",  # Added this line
-    db_type='postgresql',
-    host=host,
+    model_name ="gpt-4o-mini",
+    api_key="",
+    db_type='PostgreSQL',
+    host=host,  # Use the corrected host
     port=port,
     username=username,
     password=password,
@@ -484,7 +497,6 @@ SQL_Engine = Text2SQL(
     add_additional_context=True,
     max_attempts=10
 )
-
 
 class GetRelavantTables(BaseModel):
     """
@@ -508,9 +520,9 @@ class GetRelavantTables(BaseModel):
 
     def run(self):
         
-        docs = SQl_Engine.get_relavant_documents(self.sub_questions, top_n_similar_docs=30,filtered_tables=2)
+        docs = SQL_Engine.get_relavant_documents(self.sub_questions, top_n_similar_docs=30,filtered_tables=2)
 
-        filter_result = asyncio.run(SQl_Engine.filter_columns(self.user_question, docs))
+        filter_result = asyncio.run(SQL_Engine.filter_columns(self.user_question, docs))
 
         final_schema="# Here are the relevant table schema.\n\n"
 
@@ -547,7 +559,7 @@ class ExecuteInertmediateQuery(BaseModel):
         asyncio.run(cl.Message(f"```sql\n\n{self.sub_query}\n\n```").send())
 
 
-        return f"Observation: {SQl_Engine.execute_inertmediate_query(self.user_question, self.sub_query)}"
+        return f"Observation: {SQL_Engine.execute_inertmediate_query(self.user_question, self.sub_query)}"
 
 
 class ExecuteFinalQuery(BaseModel):
@@ -559,7 +571,7 @@ class ExecuteFinalQuery(BaseModel):
 
     def run(self):
 
-        df = SQl_Engine.run_sql_query(self.final_query)
+        df = SQL_Engine.run_sql_query(self.final_query)
 
         asyncio.run(cl.Message(f"```sql\n\n{self.final_query}\n\n```").send())
 
@@ -622,6 +634,7 @@ def start_message():
     cl.user_session.set("messages",[])
 
     cl.user_session.set("agent",agent)
+    cl.user_session.set("SQLConnector",SQLConnector)
 
     cl.user_session.set("notebookmanager",notebookmanager)
 
@@ -630,15 +643,22 @@ def start_message():
 
 @cl.on_message
 async def on_message(user_input: cl.Message):
+    messages = cl.user_session.get("messages")
+    agent = cl.user_session.get("agent")
+    SQLConnector = cl.user_session.get("SQLConnector")
 
-    messages=cl.user_session.get("messages")
+    # 👇 Handle uploads
+    if user_input.elements:
+        for element in user_input.elements:
+            if isinstance(element, cl.File):
+                file_bytes = await element.read()
+                result = SQLConnector.process_uploaded_file(element.name, file_bytes)
+                await cl.Message(content=result).send()
+                return
 
-    agent=cl.user_session.get("agent")
-
-    response = await agent.run(user_input.content,messages)
-
-    cl.user_session.set("messages",agent.messages)
-
+    # 👇 Handle text messages
+    response = await agent.run(user_input.content, messages)
+    cl.user_session.set("messages", agent.messages)
     # await cl.Message(response).send()
 
 @cl.on_chat_end
