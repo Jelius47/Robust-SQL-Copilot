@@ -38,6 +38,10 @@ cd Robust-SQL-Copilot
 ```bash
 docker-compose up
 ```
+### **Note: if its your first time**
+```bash
+docker-compose up --build
+```
 
 Access the Interface: Open your browser and go to http://localhost:8080 to start interacting with the SQL Copilot.
 
